@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <!-- 引入AI模块 -->
+    <script src="ai.js"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tetris 1-bit</title>
+    <style>
+      /* 引入复古像素字体 */
+      @import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap");
+      
+      /* CSS变量定义：颜色主题 */
+      :root {
+        --bg: #000000;    /* 背景色：黑色 */
+        --fg: #ffffff;    /* 前景色：白色 */
+        --grid: #4e4c4c;  /* 网格/次要文字颜色：深灰色 */
+      }
+      
+      /* 全局盒模型设置 */
+      * {
+        box-sizing: border-box;
+      }
+      
+      /* HTML和Body基础样式 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: "Press Start 2P", monospace; /* 使用像素字体 */
+      }
+      
+      /* Body作为flex容器，居中显示游戏 */
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      /* 游戏主容器：画布+侧边面板 */
+      .container {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+      }
+      
+      /* 侧边面板样式 */
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-width: 200px;
+      }
+      
+      /* 游戏标题 */
+      .panel h1 {
+        margin: 0;
+        font-size: 16px;
+        letter-spacing: 1px;
+      }
+      
+      /* 统计信息区域（分数、等级等） */
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+        font-size: 12px;
+      }
+      
+      /* 控制按钮容器 */
+      .controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      
+      /* 控制按钮样式（播放/暂停、重置、AI开关） */
+      .control-btn {
+        width: 48px;
+        height: 40px;
+        background: var(--bg);
+        color: var(--fg);
+        border: 2px solid var(--fg);
+        font-family: "Press Start 2P", monospace;
+        font-size: 16px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+      }
+      
+      /* 按钮按下效果 */
+      .control-btn:active {
+        transform: translateY(1px);
+      }
+      
+      /* 统计项容器 */
+      .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      
+      /* 统计标签样式 */
+      .stat .label {
+        color: var(--grid);
+        font-size: 10px;
+      }
+      
+      /* 统计数值样式 */
+      .stat .value {
+        font-size: 14px;
+        position: relative;
+        display: inline-block;
+      }
+      
+      /* AI作弊时分数显示为灰色 */
+      .stat .value.cheated {
+        color: #888888;
+      }
+      
+      /* 下一个方块预览区域 */
+      .next-wrap {
+        margin-top: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      
+      /* 下一个方块标签 */
+      .next-wrap .label {
+        color: var(--grid);
+        font-size: 10px;
+      }
+      
+      /* 下一个方块画布容器 */
+      .next-canvas-wrap {
+        position: relative;
+        width: 160px;
+        height: 80px;
+      }
+      
+      /* 下一个方块画布 */
+      .next-canvas {
+        width: 160px;
+        height: 80px;
+        background: var(--bg);
+        border: 2px solid var(--fg);
+        image-rendering: pixelated;    /* 像素化渲染，保持清晰 */
+        image-rendering: crisp-edges;  /* 兼容不同浏览器 */
+      }
+      
+      /* 游戏主画布容器 */
+      .canvas-wrap {
+        position: relative;
+        width: 400px;
+        height: 800px;
+      }
+      
+      /* 游戏主画布 */
+      canvas {
+        width: 400px;
+        height: 800px;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        display: block;
+        background: var(--bg);
+        border: 2px solid var(--fg);
+      }
+      
+      /* CRT显示器扫描线效果 */
+      .scanlines {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;  /* 不阻挡鼠标事件 */
+        background: repeating-linear-gradient(
+          to bottom,
+          rgba(0, 0, 0, 0.8) 0px,
+          rgba(0, 0, 0, 0.8) 2px,
+          rgba(0, 0, 0, 0.3) 3px,
+          rgba(0, 0, 0, 0.3) 4px
+        );
+        mix-blend-mode: multiply;  /* 混合模式 */
+      }
+      
+      /* 操作提示文字 */
+      .hint {
+        font-size: 10px;
+        line-height: 1.6;
+        color: var(--grid);
+        max-width: 220px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 游戏主容器 -->
+    <div class="container">
+      <!-- 游戏画布区域 -->
+      <div class="canvas-wrap">
+        <!-- 主游戏画布：实际分辨率200x400，显示尺寸400x800（2倍缩放） -->
+        <canvas id="game" width="200" height="400"></canvas>
+        <!-- 扫描线效果层 -->
+        <div class="scanlines"></div>
+      </div>
+      
+      <!-- 侧边面板：分数、控制按钮、预览等 -->
+      <div class="panel">
+        <h1>TETRIS</h1>
+        
+        <!-- 统计信息 -->
+        <div class="stats">
+          <div class="stat">
+            <div class="label">SCORE</div>
+            <div class="value" id="score">0</div>
+          </div>
+          <div class="stat">
+            <div class="label">BEST</div>
+            <div class="value" id="best">0</div>
+          </div>
+          <div class="stat">
+            <div class="label">LEVEL</div>
+            <div class="value" id="level">0</div>
+          </div>
+          <div class="stat">
+            <div class="label">LINES</div>
+            <div class="value" id="lines">0</div>
+          </div>
+        </div>
+        
+        <!-- 控制按钮 -->
+        <div class="controls">
+          <button class="control-btn" id="playPause" type="button" tabindex="-1">
+            ▶
+          </button>
+          <button class="control-btn" id="restart" type="button" tabindex="-1">
+            ↻
+          </button>
+          <button class="control-btn" id="toggleAI" type="button" tabindex="-1">
+            AI
+          </button>
+        </div>
+        
+        <!-- 下一个方块预览 -->
+        <div class="next-wrap">
+          <div class="label">NEXT</div>
+          <div class="next-canvas-wrap">
+            <canvas id="next" width="80" height="40" class="next-canvas"></canvas>
+            <div class="scanlines"></div>
+          </div>
+        </div>
+        
+        <!-- 操作说明 -->
+        <div class="hint">
+          ↑ 旋转<br />
+          ← → 移动<br />
+          ↓ 软降<br />
+          Space 硬降
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ==================== 1. 画布与DOM元素获取 ====================
+      
+      // 获取主游戏画布及其2D渲染上下文
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = false;  // 禁用图像平滑，保持像素清晰
+
+      // 获取下一个方块预览画布
+      const nextCanvas = document.getElementById("next");
+      const nextCtx = nextCanvas.getContext("2d");
+      nextCtx.imageSmoothingEnabled = false;
+
+      // 获取UI元素引用
+      const scoreEl = document.getElementById("score");       // 分数显示
+      const bestEl = document.getElementById("best");         // 最高分显示
+      const levelEl = document.getElementById("level");       // 等级显示
+      const linesEl = document.getElementById("lines");       // 消除行数显示
+      const playPauseBtn = document.getElementById("playPause");  // 播放/暂停按钮
+      const restartBtn = document.getElementById("restart");      // 重置按钮
+      const toggleAIBtn = document.getElementById("toggleAI");    // AI开关按钮
+
+      // ==================== 2. 游戏常量定义 ====================
+      
+      const COLS = 10;           // 游戏板列数
+      const ROWS = 20;           // 游戏板行数
+      const CELL = 20;           // 每个格子的大小（像素）
+      const SUB = 4;             // 每个格子内部的子格子大小（用于像素风格）
+      const GAP = 1;             // 子格子之间的间隙
+      const SUB_TOTAL = SUB * 4 + GAP * 3;  // 一个格子的总大小
+
+      const BASE_SPEED = 1000;   // 基础下落速度（毫秒）
+      const MIN_SPEED = 100;     // 最小下落速度（毫秒）
+      const BEST_KEY = "tetris_best";  // localStorage中最高分的键名
+
+      // ==================== 3. 方块形状定义（SRS旋转系统） ====================
+      
+      /**
+       * 定义7种俄罗斯方块的4种旋转状态
+       * 每个方块用4x4矩阵表示，1表示有块，0表示空
+       * 索引：SHAPES[方块类型][旋转状态][y][x]
+       */
+      const SHAPES = {
+        // I块（长条）：4种旋转状态
+        I: [
+          [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]],  // 水平
+          [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0]],  // 垂直
+          [[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0]],  // 水平（反向）
+          [[0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0]]   // 垂直（反向）
+        ],
+        // O块（方块）：旋转不变
+        O: [
+          [[0, 1, 1, 0], [0, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+          [[0, 1, 1, 0], [0, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+          [[0, 1, 1, 0], [0, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+          [[0, 1, 1, 0], [0, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+        ],
+        // T块：4种旋转状态
+        T: [
+          [[0, 1, 0, 0], [1, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]],  // T朝上
+          [[0, 1, 0, 0], [0, 1, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0]],  // T朝右
+          [[0, 0, 0, 0], [1, 1, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0]],  // T朝下
+          [[0, 1, 0, 0], [1, 1, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0]]   // T朝左
+        ],
+        // S块（右扭）：4种旋转状态
+        S: [
+          [[0, 1, 1, 0], [1, 1, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+          [[0, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 0], [0, 0, 0, 0]],
+          [[0, 0, 0, 0], [0, 1, 1, 0], [1, 1, 0, 0], [0, 0, 0, 0]],
+          [[1, 0, 0, 0], [1, 1, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0]]
+        ],
+        // Z块（左扭）：4种旋转状态
+        Z: [
+          [[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+          [[0, 0, 1, 0], [0, 1, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0]],
+          [[0, 0, 0, 0], [1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 0, 0]],
+          [[0, 1, 0, 0], [1, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]]
+        ],
+        // J块（左L）：4种旋转状态
+        J: [
+          [[1, 0, 0, 0], [1, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+          [[0, 1, 1, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0]],
+          [[0, 0, 0, 0], [1, 1, 1, 0], [0, 0, 1, 0], [0, 0, 0, 0]],
+          [[0, 1, 0, 0], [0, 1, 0, 0], [1, 1, 0, 0], [0, 0, 0, 0]]
+        ],
+        // L块（右L）：4种旋转状态
+        L: [
+          [[0, 0, 1, 0], [1, 1, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+          [[0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 1, 0], [0, 0, 0, 0]],
+          [[0, 0, 0, 0], [1, 1, 1, 0], [1, 0, 0, 0], [0, 0, 0, 0]],
+          [[1, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0]]
+        ]
+      };
+
+      // 方块类型数组，用于随机生成
+      const TYPES = Object.keys(SHAPES);
+
+      // ==================== 4. 游戏状态管理 ====================
+      
+      /**
+       * 游戏状态对象，包含所有游戏运行时数据
+       */
+      const state = {
+        board: [],           // 游戏板状态，10x20二维数组（0=空，1=有块）
+        piece: null,         // 当前控制的方块
+        nextPiece: null,     // 下一个方块
+        score: 0,            // 当前分数
+        best: 0,             // 最高分
+        lines: 0,            // 消除行数
+        level: 0,            // 当前等级
+        dropTimer: 0,        // 下落计时器（累积时间）
+        dropInterval: BASE_SPEED,  // 当前下落间隔
+        lastTime: 0,         // 上一帧时间戳
+        clearingLines: [],   // 正在消除的行索引（用于动画）
+        clearingTimer: 0,    // 消除动画计时器
+        gameOver: false,     // 游戏结束标志
+        softDrop: false,     // 软降（加速下落）标志
+        running: false,      // 游戏运行标志
+        newRecord: false,    // 新纪录标志
+
+        // AI相关状态
+        pieceQueue: [],      // 方块队列，存储当前+未来2个（共3个）
+        aiMode: false,       // AI开关
+        aiUsed: false,       // 是否使用过AI（用于标记作弊）
+        aiActionQueue: [],   // AI动作队列（非空时自动执行）
+        aiThinking: false,   // 防止重复决策标志
+        aiActionTimer: 0,    // 动作执行计时器（累积时间）
+        aiActionDelay: 200,  // 动作间隔（毫秒），越大AI越慢
+      };
+
+      // ==================== 5. 本地存储函数 ====================
+      
+      /**
+       * 从localStorage加载最高分
+       * @returns {number} 存储的最高分，如果没有则返回0
+       */
+      function loadBest() {
+        const stored = Number(localStorage.getItem(BEST_KEY));
+        return Number.isFinite(stored) ? stored : 0;
+      }
+
+      /**
+       * 保存最高分到localStorage
+       */
+      function saveBest() {
+        localStorage.setItem(BEST_KEY, state.best.toString());
+      }
+
+      // ==================== 6. 游戏板与方块操作 ====================
+      
+      /**
+       * 创建新的空游戏板
+       * @returns {Array} 10x20的二维数组，全部填充0
+       */
+      function createBoard() {
+        const board = [];
+        for (let y = 0; y < ROWS; y += 1) {
+          const row = new Array(COLS).fill(0);
+          board.push(row);
+        }
+        return board;
+      }
+
+      /**
+       * 随机生成一个新方块
+       * @returns {Object} 方块对象，包含type, rotation, x, y属性
+       */
+      function randomPiece() {
+        const type = TYPES[Math.floor(Math.random() * TYPES.length)];
+        return {
+          type,        // 方块类型（I, O, T, S, Z, J, L）
+          rotation: 0,  // 初始旋转状态
+          x: 3,         // 初始X位置（居中）
+          y: 0          // 初始Y位置（顶部）
+        };
+      }
+
+      /**
+       * 获取方块在指定旋转状态下的矩阵
+       * @param {Object} piece - 方块对象
+       * @returns {Array} 4x4的矩阵
+       */
+      function getMatrix(piece) {
+        return SHAPES[piece.type][piece.rotation];
+      }
+
+      /**
+       * 重置游戏状态
+       */
+      function resetGame() {
+        state.board = createBoard();  // 创建新的空游戏板
+        // 初始化方块队列，预生成3个方块
+        state.pieceQueue = [randomPiece(), randomPiece(), randomPiece()];
+        // 从队列取出第一个作为当前方块
+        state.piece = state.pieceQueue.shift();
+        // 补充队列，保持3个方块
+        state.pieceQueue.push(randomPiece());
+        
+        state.nextPiece = randomPiece();  // 设置下一个方块
+        
+        // 重置游戏数据
+        state.score = 0;
+        state.lines = 0;
+        state.level = 0;
+        state.dropTimer = 0;
+        state.dropInterval = BASE_SPEED;
+        state.lastTime = performance.now();
+        state.clearingLines = [];
+        state.clearingTimer = 0;
+        state.gameOver = false;
+        state.softDrop = false;
+        state.running = false;
+        state.newRecord = false;
+        
+        // 标记是否使用过AI（作弊标记）
+        state.aiUsed = state.aiMode;
+        if (state.aiUsed) {
+          scoreEl.classList.add("cheated");  // AI使用时分数显示为灰色
+        } else {
+          scoreEl.classList.remove("cheated");
+        }
+        
+        updateHud();       // 更新UI显示
+        updateControls();  // 更新控制按钮状态
+      }
+
+      // ==================== 7. AI控制接口 ====================
+      
+      /**
+       * 游戏控制接口，供AI模块调用
+       */
+      const GameControl = {
+        /**
+         * 获取完整游戏状态（深拷贝，防止AI篡改）
+         * @returns {Object} 包含board, current, queue, level, score的游戏状态
+         */
+        getState: () => ({
+          board: state.board.map(row => [...row]), // 深拷贝二维数组
+          current: { ...state.piece },             // 当前方块浅拷贝
+          queue: state.pieceQueue.map(p => ({ ...p })), // 3个未来方块
+          level: state.level,
+          score: state.score
+        }),
+        
+        /**
+         * 将动作序列加入AI动作队列
+         * @param {Array} actions - 动作数组，如 ['R','R','U','H']
+         */
+        queueActions: (actions) => {
+          state.aiActionQueue.push(...actions);
+        },
+        
+        /**
+         * 清空AI动作队列（用于手动接管）
+         */
+        clearActions: () => {
+          state.aiActionQueue = [];
+        }
+      };
+
+      /**
+       * 动作映射表：将动作代码映射到对应的游戏函数
+       * L: 左移, R: 右移, U: 旋转, D: 软降, H: 硬降, N: 无操作
+       */
+      const ACTION_MAP = {
+        'L': () => move(-1),
+        'R': () => move(1),
+        'U': () => rotate(1),
+        'D': () => {
+          state.softDrop = true;
+          setTimeout(() => state.softDrop = false, 100);
+        },
+        'H': () => hardDrop(),
+        'N': () => null,
+      };
+
+      /**
+       * 执行单个AI动作
+       * @param {string} action - 动作代码
+       */
+      function executeAction(action) {
+        if (state.gameOver) return;
+        if (ACTION_MAP[action]) {
+          ACTION_MAP[action]();
+        }
+      }
+
+      /**
+       * 触发AI决策
+       * 调用TetrisAI.decide()获取最佳动作序列
+       */
+      function triggerAIDecision() {
+        if (!state.aiMode || state.aiThinking || state.gameOver) return;
+        
+        state.aiThinking = true;
+        try {
+          const actions = TetrisAI.decide(GameControl.getState());
+          if (Array.isArray(actions) && actions.length > 0) {
+            GameControl.queueActions(actions);
+            console.log("AI 动作序列:", actions);
+          }
+        } catch (e) {
+          console.error("AI 决策错误:", e);
+        }
+        state.aiThinking = false;
+      }
+
+      // ==================== 8. 碰撞检测与方块操作 ====================
+      
+      /**
+       * 检测方块与游戏板或边界的碰撞
+       * @param {Array} board - 游戏板状态
+       * @param {Object} piece - 方块对象
+       * @returns {boolean} 是否发生碰撞
+       */
+      function collide(board, piece) {
+        const matrix = getMatrix(piece);
+        for (let y = 0; y < 4; y += 1) {
+          for (let x = 0; x < 4; x += 1) {
+            if (!matrix[y][x]) continue;  // 跳过空方格
+            const boardX = piece.x + x;
+            const boardY = piece.y + y;
+            
+            // 检查左右边界和底部边界
+            if (boardX < 0 || boardX >= COLS || boardY >= ROWS) {
+              return true;
+            }
+            
+            // 检查与已有方块的碰撞（注意boardY<0时为生成区，不算碰撞）
+            if (boardY >= 0 && board[boardY][boardX]) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+
+      /**
+       * 将当前方块固定到游戏板上
+       * @param {Array} board - 游戏板状态
+       * @param {Object} piece - 方块对象
+       */
+      function merge(board, piece) {
+        const matrix = getMatrix(piece);
+        for (let y = 0; y < 4; y += 1) {
+          for (let x = 0; x < 4; x += 1) {
+            if (!matrix[y][x]) continue;
+            const boardY = piece.y + y;
+            if (boardY >= 0) {
+              board[boardY][piece.x + x] = 1;
+            }
+          }
+        }
+      }
+
+      // ==================== 9. 消行逻辑 ====================
+      
+      /**
+       * 检查并标记需要消除的行
+       * @returns {boolean} 是否有行需要消除
+       */
+      function clearLines() {
+        const linesToClear = [];
+        for (let y = 0; y < ROWS; y += 1) {
+          // 检查该行是否全部填满
+          if (state.board[y].every((cell) => cell === 1)) {
+            linesToClear.push(y);
+          }
+        }
+        if (linesToClear.length > 0) {
+          state.clearingLines = linesToClear;
+          state.clearingTimer = 600; // 600ms消除动画时间
+          return true;
+        }
+        return false;
+      }
+
+      /**
+       * 完成消行处理：删除已满的行并更新分数
+       */
+      function finishClearLines() {
+        const cleared = state.clearingLines.length;
+        
+        // 过滤掉已消除的行
+        const newBoard = state.board.filter((_, y) => !state.clearingLines.includes(y));
+        
+        // 在顶部补充新的空行
+        while (newBoard.length < ROWS) {
+          newBoard.unshift(new Array(COLS).fill(0));
+        }
+        state.board = newBoard;
+
+        // 计算分数：单行40，双行100，三行300，四行1200（Tetris）
+        const lineScores = [0, 40, 100, 300, 1200];
+        state.score += lineScores[cleared] * (state.level + 1);
+        state.lines += cleared;
+        
+        // 每消除10行升一级
+        state.level = Math.floor(state.lines / 10);
+        
+        // 更新下落速度：每级加快10%
+        const speed = BASE_SPEED * Math.pow(0.9, state.level);
+        state.dropInterval = Math.max(MIN_SPEED, Math.round(speed));
+        
+        updateBest();  // 检查并更新最高分
+        
+        state.clearingLines = [];
+        state.clearingTimer = 0;
+        spawnPiece();  // 生成新方块
+        updateHud();
+      }
+
+      // ==================== 10. 方块移动控制 ====================
+      
+      /**
+       * 水平移动方块
+       * @param {number} offsetX - 移动偏移量（-1左，1右）
+       */
+      function move(offsetX) {
+        state.piece.x += offsetX;
+        if (collide(state.board, state.piece)) {
+          state.piece.x -= offsetX;  // 碰撞则回退
+        }
+      }
+
+      /**
+       * SRS（Super Rotation System）踢墙表
+       * 用于处理方块旋转时的边界情况
+       * 索引：[起始旋转][目标旋转] -> [[x偏移, y偏移], ...]
+       */
+      const SRS_KICKS = {
+        0: {
+          1: [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+          3: [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]]
+        },
+        1: {
+          2: [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+          0: [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]]
+        },
+        2: {
+          3: [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+          1: [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]]
+        },
+        3: {
+          0: [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+          2: [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]]
+        }
+      };
+
+      /**
+       * 旋转方块（带踢墙处理）
+       */
+      function rotate() {
+        const prevRot = state.piece.rotation;
+        const nextRot = (prevRot + 1) % 4;
+        const prevX = state.piece.x;
+        const prevY = state.piece.y;
+        
+        state.piece.rotation = nextRot;
+        
+        // 尝试SRS踢墙偏移
+        const kicks = SRS_KICKS[prevRot][nextRot];
+        if (kicks) {
+          for (const [kx, ky] of kicks) {
+            state.piece.x = prevX + kx;
+            state.piece.y = prevY - ky; // SRS的y向上为正，坐标系向下为正
+            if (!collide(state.board, state.piece)) return;
+          }
+        }
+        
+        // 所有踢墙都失败，恢复原状
+        state.piece.rotation = prevRot;
+        state.piece.x = prevX;
+        state.piece.y = prevY;
+      }
+
+      /**
+       * 自然下落一格
+       */
+      function drop() {
+        state.piece.y += 1;
+        if (!collide(state.board, state.piece)) return;
+        state.piece.y -= 1;
+        merge(state.board, state.piece);  // 固定方块
+        if (!clearLines()) {
+          spawnPiece();  // 生成新方块
+        }
+        updateHud();
+      }
+
+      /**
+       * 硬降（直接落到底部）
+       */
+      function hardDrop() {
+        while (!collide(state.board, state.piece)) {
+          state.piece.y += 1;
+        }
+        state.piece.y -= 1;
+        merge(state.board, state.piece);
+        if (!clearLines()) {
+          spawnPiece();
+        }
+        updateHud();
+      }
+
+      /**
+       * 生成新方块
+       */
+      function spawnPiece() {
+        // 从队列取出下一个方块
+        state.piece = state.pieceQueue.shift();
+        // 补充队列
+        state.pieceQueue.push(randomPiece());
+        
+        state.nextPiece = randomPiece();
+
+        // 检查游戏结束（新方块生成即碰撞）
+        if (collide(state.board, state.piece)) {
+          state.gameOver = true;
+          state.running = false;
+          updateControls();
+        }
+        
+        // AI模式下触发决策
+        if(state.aiMode && !state.gameOver) {
+          setTimeout(triggerAIDecision, 100); // 100ms后让AI决策
+        }
+      }
+
+      // ==================== 11. UI更新函数 ====================
+      
+      /**
+       * 更新HUD（分数、等级等显示）
+       */
+      function updateHud() {
+        scoreEl.textContent = state.score.toString();
+        bestEl.textContent = state.best.toString();
+        levelEl.textContent = state.level.toString();
+        linesEl.textContent = state.lines.toString();
+      }
+
+      /**
+       * 更新最高分
+       */
+      function updateBest() {
+        if (state.aiUsed) return;  // AI作弊模式下不记录最高分
+        if (state.score > state.best) {
+          state.best = state.score;
+          state.newRecord = true;
+          saveBest();
+          updateHud();
+        }
+      }
+
+      /**
+       * 更新控制按钮显示
+       */
+      function updateControls() {
+        playPauseBtn.textContent = state.running ? "⏹" : "▶";
+      }
+
+      /**
+       * 开始游戏
+       */
+      function startGame() {
+        if (state.gameOver) {
+          resetGame();
+        }
+        state.running = true;
+        state.dropTimer = 0;
+        state.lastTime = performance.now();
+        updateControls();
+      }
+
+      /**
+       * 切换暂停状态
+       */
+      function togglePause() {
+        if (!state.running) {
+          startGame();
+        } else {
+          state.running = false;
+          updateControls();
+        }
+      }
+
+      /**
+       * 重新开始游戏
+       */
+      function restartGame() {
+        resetGame();
+      }
+
+      // ==================== 12. 渲染函数 ====================
+      
+      /**
+       * 绘制单个格子（像素风格：4x4子格子组成）
+       * @param {CanvasRenderingContext2D} targetCtx - 目标画布上下文
+       * @param {number} x - 格子X坐标
+       * @param {number} y - 格子Y坐标
+       */
+      function drawCell(targetCtx, x, y) {
+        const baseX = x * CELL;
+        const baseY = y * CELL;
+        // 每个格子由4x4的子格子组成，营造像素感
+        for (let row = 0; row < 4; row += 1) {
+          for (let col = 0; col < 4; col += 1) {
+            const px = baseX + col * (SUB + GAP);
+            const py = baseY + row * (SUB + GAP);
+            targetCtx.fillRect(px, py, SUB, SUB);
+          }
+        }
+      }
+
+      /**
+       * 绘制网格线
+       */
+      function drawGrid() {
+        ctx.strokeStyle = "#333333";
+        ctx.lineWidth = 1;
+        // 垂直线
+        for (let x = 0; x <= COLS; x += 1) {
+          ctx.beginPath();
+          ctx.moveTo(x * CELL + 0.5, 0);
+          ctx.lineTo(x * CELL + 0.5, ROWS * CELL);
+          ctx.stroke();
+        }
+        // 水平线
+        for (let y = 0; y <= ROWS; y += 1) {
+          ctx.beginPath();
+          ctx.moveTo(0, y * CELL + 0.5);
+          ctx.lineTo(COLS * CELL, y * CELL + 0.5);
+          ctx.stroke();
+        }
+      }
+
+      /**
+       * 绘制游戏板
+       */
+      function drawBoard() {
+        // 清空画布
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        drawGrid();
+        
+        // 绘制已固定的方块
+        ctx.fillStyle = "#ffffff";
+        for (let y = 0; y < ROWS; y += 1) {
+          for (let x = 0; x < COLS; x += 1) {
+            if (state.board[y][x]) {
+              drawCell(ctx, x, y);
+            }
+          }
+        }
+
+        // 绘制消行动画（红色横线）
+        if (state.clearingLines.length > 0) {
+          ctx.fillStyle = "#d51212";
+          state.clearingLines.forEach(y => {
+            const centerY = y * CELL + CELL / 2;
+            ctx.fillRect(0, centerY - 6, canvas.width, 12);
+          });
+        }
+      }
+
+      /**
+       * 绘制当前控制的方块
+       */
+      function drawPiece() {
+        const matrix = getMatrix(state.piece);
+        ctx.fillStyle = "#ffffff";
+        for (let y = 0; y < 4; y += 1) {
+          for (let x = 0; x < 4; x += 1) {
+            if (matrix[y][x]) {
+              const drawX = state.piece.x + x;
+              const drawY = state.piece.y + y;
+              if (drawY >= 0) {  // 只绘制在可见区域的方块
+                drawCell(ctx, drawX, drawY);
+              }
+            }
+          }
+        }
+      }
+
+      /**
+       * 绘制下一个方块预览
+       */
+      function drawNext() {
+        // 清空预览画布
+        nextCtx.fillStyle = "#000000";
+        nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+        
+        // 绘制4x2网格
+        nextCtx.strokeStyle = "#333333";
+        nextCtx.lineWidth = 1;
+        for (let x = 0; x <= 4; x += 1) {
+          nextCtx.beginPath();
+          nextCtx.moveTo(x * CELL + 0.5, 0);
+          nextCtx.lineTo(x * CELL + 0.5, 2 * CELL);
+          nextCtx.stroke();
+        }
+        for (let y = 0; y <= 2; y += 1) {
+          nextCtx.beginPath();
+          nextCtx.moveTo(0, y * CELL + 0.5);
+          nextCtx.lineTo(4 * CELL, y * CELL + 0.5);
+          nextCtx.stroke();
+        }
+
+        if (!state.nextPiece) return;
+        
+        // 获取队列中的第一个方块作为"下一个"
+        const next = state.pieceQueue[0];
+        const matrix = getMatrix(next);
+        nextCtx.fillStyle = "#ffffff";
+
+        // 计算方块的边界以居中显示
+        let minX = 4, maxX = 0, minY = 4, maxY = 0;
+        let hasContent = false;
+        for (let y = 0; y < 4; y++) {
+          for (let x = 0; x < 4; x++) {
+            if (matrix[y][x]) {
+              minX = Math.min(minX, x);
+              maxX = Math.max(maxX, x);
+              minY = Math.min(minY, y);
+              maxY = Math.max(maxY, y);
+              hasContent = true;
+            }
+          }
+        }
+
+        // 居中绘制方块
+        if (hasContent) {
+          const shapeW = maxX - minX + 1;
+          const shapeH = maxY - minY + 1;
+          const offsetX = (4 - shapeW) / 2 - minX;
+          const offsetY = (2 - shapeH) / 2 - minY;
+
+          for (let y = 0; y < 4; y++) {
+            for (let x = 0; x < 4; x++) {
+              if (matrix[y][x]) {
+                drawCell(nextCtx, x + offsetX, y + offsetY);
+              }
+            }
+          }
+        }
+      }
+
+      /**
+       * 绘制游戏结束画面
+       */
+      function drawGameOver() {
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawGrid();
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "16px 'Press Start 2P', monospace";
+        
+        if (state.newRecord) {
+          // 新纪录显示
+          const centerX = canvas.width / 2;
+          const centerY = canvas.height / 2;
+          ctx.fillText("NEW RECORD", centerX, centerY - 12);
+          ctx.fillText(`${state.best}`, centerX, centerY + 12);
+        } else {
+          // 普通游戏结束
+          ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2);
+        }
+      }
+
+      // ==================== 13. 游戏主循环 ====================
+      
+      /**
+       * 游戏主更新循环（使用requestAnimationFrame）
+       * @param {number} time - 当前时间戳
+       */
+      function update(time) {
+        const delta = time - state.lastTime;  // 计算帧间隔
+        state.lastTime = time;
+        
+        if (!state.gameOver) {
+          if (state.running) {
+            // ===== AI动作执行 =====
+            state.aiActionTimer += delta;
+            if (state.aiActionTimer >= state.aiActionDelay) {
+              state.aiActionTimer = 0;
+              if (state.aiActionQueue.length > 0) {
+                const action = state.aiActionQueue.shift();
+                executeAction(action);
+                // 硬降后额外停顿，让用户看清落点
+                if (action === 'H') {
+                  state.aiActionTimer = -200; // 负数表示停顿300ms才开始下一个动作
+                }
+              }
+            }
+            // ================================================
+
+            // 处理消行动画
+            if (state.clearingLines.length > 0) {
+              state.clearingTimer -= delta;
+              if (state.clearingTimer <= 0) {
+                finishClearLines();
+              }
+            } else {
+              // 正常下落处理
+              state.dropTimer += delta;
+              const interval = state.softDrop ? 50 : state.dropInterval;
+              if (state.dropTimer >= interval) {
+                drop();
+                state.dropTimer = 0;
+              }
+            }
+          }
+          
+          // 渲染
+          drawBoard();
+          if (state.clearingLines.length === 0) {
+            drawPiece();
+          }
+          drawNext();
+        } else {
+          drawGameOver();
+        }
+        
+        // 请求下一帧
+        requestAnimationFrame(update);
+      }
+
+      // ==================== 14. 事件监听 ====================
+      
+      /**
+       * 键盘按下事件处理
+       */
+      document.addEventListener("keydown", (event) => {
+        // 玩家操作时自动关闭AI
+        if (state.aiMode && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].includes(event.code)) {
+          state.aiMode = false;
+          document.getElementById("toggleAI").style.background = "#000";
+          document.getElementById("toggleAI").style.color = "#fff";
+          GameControl.clearActions(); // 清空AI待执行动作
+        }
+        
+        if (state.gameOver || !state.running) return;
+        
+        // 方向键控制
+        if (event.code === "ArrowLeft") {
+          move(-1);
+        } else if (event.code === "ArrowRight") {
+          move(1);
+        } else if (event.code === "ArrowUp") {
+          rotate();
+        } else if (event.code === "ArrowDown") {
+          state.softDrop = true;  // 软降开始
+        } else if (event.code === "Space") {
+          hardDrop();
+        }
+      });
+
+      /**
+       * 键盘释放事件处理
+       */
+      document.addEventListener("keyup", (event) => {
+        if (event.code === "ArrowDown") {
+          state.softDrop = false;  // 软降结束
+        }
+      });
+
+      // 播放/暂停按钮点击
+      playPauseBtn.addEventListener("click", () => {
+        togglePause();
+        playPauseBtn.blur();  // 移除焦点，防止空格键触发按钮
+      });
+
+      // 重置按钮点击
+      restartBtn.addEventListener("click", () => {
+        restartGame();
+        restartBtn.blur();
+      });
+
+      // AI开关按钮点击
+      toggleAIBtn.addEventListener("click", () => {
+        state.aiMode = !state.aiMode;
+        if (state.aiMode) {
+          state.aiUsed = true;
+          scoreEl.classList.add("cheated");
+        }
+        // 视觉反馈：AI开启时按钮白底黑字
+        toggleAIBtn.style.background = state.aiMode ? "#ffffff" : "#000000";
+        toggleAIBtn.style.color = state.aiMode ? "#000000" : "#ffffff";
+        
+        if (state.aiMode) {
+          // 开启AI：如果有当前方块且队列为空，立即决策
+          if (state.piece && state.aiActionQueue.length === 0) {
+            triggerAIDecision();
+          }
+        } else {
+          // 关闭AI：清空动作队列，交还人工控制
+          GameControl.clearActions();
+        }
+        toggleAIBtn.blur();
+      });
+
+      // 防止按钮在获得焦点时响应空格/回车键
+      playPauseBtn.addEventListener("keydown", (event) => {
+        if (event.code === "Space" || event.code === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      });
+
+      restartBtn.addEventListener("keydown", (event) => {
+        if (event.code === "Space" || event.code === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      });
+
+      // ==================== 15. 游戏初始化 ====================
+      
+      state.best = loadBest();  // 加载最高分
+      resetGame();              // 初始化游戏状态
+      requestAnimationFrame(update);  // 启动游戏循环
+    </script>
+  </body>
+</html>
